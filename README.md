@@ -1,7 +1,7 @@
 # mobi2epub
 
-A small, dependency-free command-line tool that converts MOBI ebooks to EPUB.
-It's a single static binary written in Rust using only the standard library.
+A small command-line tool that converts MOBI ebooks to EPUB, shipped as a
+single static binary written in Rust.
 
 ## Usage
 
@@ -32,6 +32,19 @@ attributes and so on) is cleaned up into well-formed XHTML.
 - DRM-protected books
 - KF8-only books (`.azw3`, or MOBI files with no MOBI 6 section)
 
+## Crash reporting
+
+Release builds report crashes and unreadable books to
+[Sentry](https://sentry.io) so problems can be fixed. A report contains the
+error or stack trace, the tool version, OS and architecture, and for
+unreadable books the file extension and size. File names, paths and book
+contents are never sent.
+
+To turn reporting off, set `MOBI2EPUB_NO_TELEMETRY=1`. To send reports to
+your own Sentry project instead, set `SENTRY_DSN`. Builds from source have
+reporting off unless `MOBI2EPUB_SENTRY_DSN` is set at build time or
+`SENTRY_DSN` at run time.
+
 ## Building
 
 ```sh
@@ -55,3 +68,6 @@ for f in test-out/*.mobi; do python3 tests/check_epub.py "$f" "${f%.mobi}.epub";
 Publishing a GitHub release triggers a workflow that builds binaries for
 Linux amd64 and arm64 (static, musl), macOS arm64, and Windows x64 and
 ARM64, and attaches them to the release (`.tar.gz`, or `.zip` on Windows).
+Set the `SENTRY_DSN` repository secret to enable crash reporting in those
+builds. Pull requests and pushes to `main` run the same builds without
+publishing anything.

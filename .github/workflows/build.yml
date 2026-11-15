@@ -1,6 +1,9 @@
-name: Release
+name: Build
 
 on:
+  push:
+    branches: [main]
+  pull_request:
   release:
     types: [published]
   workflow_dispatch:
@@ -8,14 +11,40 @@ on:
 permissions:
   contents: write
 
+env:
+  # Pull requests may change dependencies, so they build without --locked;
+  # everything else must match the committed Cargo.lock.
+  CARGO_LOCKED: ${{ github.event_name == 'pull_request' && '' || '--locked' }}
+
 jobs:
+  lockfile:
+    # Commit a refreshed Cargo.lock to same-repo PR branches when
+    # Cargo.toml changed, so main and releases can build with --locked.
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Resolve dependencies
+        run: cargo metadata --format-version 1 > /dev/null
+      - name: Commit Cargo.lock if it changed
+        run: |
+          if ! git diff --quiet -- Cargo.lock; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -m "Update Cargo.lock" -- Cargo.lock
+            git push
+          fi
+
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Build
-        run: cargo build --release --locked
+        run: cargo build --release $CARGO_LOCKED
       - name: Convert and validate synthetic MOBI books
         run: |
           python3 tests/make_mobi.py test-out
@@ -53,12 +82,16 @@ jobs:
         if: contains(matrix.target, 'musl')
         run: sudo apt-get update && sudo apt-get install -y musl-tools
       - name: Build
-        run: cargo build --release --locked --target ${{ matrix.target }}
+        shell: bash
+        env:
+          # Baked into release binaries; empty (reporting off) if the secret isn't set.
+          MOBI2EPUB_SENTRY_DSN: ${{ github.event_name == 'release' && secrets.SENTRY_DSN || '' }}
+        run: cargo build --release $CARGO_LOCKED --target ${{ matrix.target }}
       - name: Package
         id: package
         shell: bash
         run: |
-          version="${GITHUB_REF_NAME}"
+          version="${GITHUB_REF_NAME//\//-}"
           dir="mobi2epub-${version}-${{ matrix.name }}"
           mkdir "$dir"
           cp README.md LICENSE "$dir/"

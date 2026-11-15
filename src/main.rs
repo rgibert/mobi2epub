@@ -3,6 +3,7 @@
 mod epub;
 mod html;
 mod mobi;
+mod telemetry;
 mod zip;
 
 use std::collections::HashMap;
@@ -22,6 +23,8 @@ Options:
   -V, --version       show version";
 
 fn main() -> ExitCode {
+    // Kept alive for the whole run; dropping it flushes pending reports.
+    let _telemetry = telemetry::init();
     let mut inputs = Vec::new();
     let mut output: Option<PathBuf> = None;
     let mut force = false;
@@ -66,7 +69,11 @@ fn main() -> ExitCode {
         match convert(input, &out, force) {
             Ok(msg) => println!("{} -> {} ({msg})", input.display(), out.display()),
             Err(e) => {
-                eprintln!("{}: error: {e}", input.display());
+                eprintln!("{}: error: {}", input.display(), e.message());
+                if let ConvertError::Book { message, size } = &e {
+                    let ext = input.extension().and_then(|x| x.to_str()).unwrap_or("").to_ascii_lowercase();
+                    telemetry::report_book_error(message, &ext, *size);
+                }
                 failed = true;
             }
         }
@@ -74,15 +81,33 @@ fn main() -> ExitCode {
     if failed { ExitCode::FAILURE } else { ExitCode::SUCCESS }
 }
 
-fn convert(input: &Path, output: &Path, force: bool) -> Result<String, String> {
+/// Why a conversion failed. Only `Book` errors (problems with the ebook
+/// itself) are reported to Sentry; usage and file-system errors are not.
+enum ConvertError {
+    Usage(String),
+    Io(String),
+    Book { message: String, size: usize },
+}
+
+impl ConvertError {
+    fn message(&self) -> &str {
+        match self {
+            ConvertError::Usage(m) | ConvertError::Io(m) => m,
+            ConvertError::Book { message, .. } => message,
+        }
+    }
+}
+
+fn convert(input: &Path, output: &Path, force: bool) -> Result<String, ConvertError> {
     if output == input {
-        return Err("output path is the same as the input".into());
+        return Err(ConvertError::Usage("output path is the same as the input".into()));
     }
     if output.exists() && !force {
-        return Err(format!("{} already exists (use -f to overwrite)", output.display()));
+        return Err(ConvertError::Usage(format!("{} already exists (use -f to overwrite)", output.display())));
     }
-    let data = std::fs::read(input).map_err(|e| format!("cannot read file: {e}"))?;
-    let book = mobi::parse(data)?;
+    let data = std::fs::read(input).map_err(|e| ConvertError::Io(format!("cannot read file: {e}")))?;
+    let size = data.len();
+    let book = mobi::parse(data).map_err(|message| ConvertError::Book { message, size })?;
     let images = epub::collect_images(&book);
     let conv = if book.is_html {
         let names: HashMap<usize, String> = images.iter().map(|(k, v)| (*k, v.file.clone())).collect();
@@ -91,7 +116,7 @@ fn convert(input: &Path, output: &Path, force: bool) -> Result<String, String> {
         html::convert_plain(&book.text)
     };
     let (bytes, stats) = epub::build(&book, &conv, &images);
-    std::fs::write(output, bytes).map_err(|e| format!("cannot write {}: {e}", output.display()))?;
+    std::fs::write(output, bytes).map_err(|e| ConvertError::Io(format!("cannot write {}: {e}", output.display())))?;
     Ok(format!(
         "\"{}\", {} part{}, {} image{}",
         book.title.trim(),
