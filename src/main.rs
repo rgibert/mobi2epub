@@ -66,14 +66,24 @@ fn main() -> ExitCode {
     let mut failed = false;
     for input in &inputs {
         let out = output.clone().unwrap_or_else(|| input.with_extension("epub"));
-        match convert(input, &out, force) {
-            Ok(msg) => println!("{} -> {} ({msg})", input.display(), out.display()),
+        let ext = input.extension().and_then(|x| x.to_str()).unwrap_or("").to_ascii_lowercase();
+        let trace = telemetry::Conversion::start(&ext);
+        match convert(input, &out, force, &trace) {
+            Ok(msg) => {
+                println!("{} -> {} ({msg})", input.display(), out.display());
+                trace.finish(telemetry::Outcome::Ok);
+            }
             Err(e) => {
                 eprintln!("{}: error: {}", input.display(), e.message());
-                if let ConvertError::Book { message, size } = &e {
-                    let ext = input.extension().and_then(|x| x.to_str()).unwrap_or("").to_ascii_lowercase();
-                    telemetry::report_book_error(message, &ext, *size);
-                }
+                let outcome = match &e {
+                    ConvertError::Book { message, size } => {
+                        telemetry::report_book_error(message, &ext, *size);
+                        telemetry::Outcome::BadBook
+                    }
+                    ConvertError::Usage(_) => telemetry::Outcome::Usage,
+                    ConvertError::Io(_) => telemetry::Outcome::Io,
+                };
+                trace.finish(outcome);
                 failed = true;
             }
         }
@@ -98,25 +108,38 @@ impl ConvertError {
     }
 }
 
-fn convert(input: &Path, output: &Path, force: bool) -> Result<String, ConvertError> {
+fn convert(input: &Path, output: &Path, force: bool, trace: &telemetry::Conversion) -> Result<String, ConvertError> {
     if output == input {
         return Err(ConvertError::Usage("output path is the same as the input".into()));
     }
     if output.exists() && !force {
         return Err(ConvertError::Usage(format!("{} already exists (use -f to overwrite)", output.display())));
     }
-    let data = std::fs::read(input).map_err(|e| ConvertError::Io(format!("cannot read file: {e}")))?;
+    let data = trace
+        .step("file.read", "Read input", || std::fs::read(input))
+        .map_err(|e| ConvertError::Io(format!("cannot read file: {e}")))?;
     let size = data.len();
-    let book = mobi::parse(data).map_err(|message| ConvertError::Book { message, size })?;
-    let images = epub::collect_images(&book);
-    let conv = if book.is_html {
-        let names: HashMap<usize, String> = images.iter().map(|(k, v)| (*k, v.file.clone())).collect();
-        html::convert(&book.text, book.utf8, &names)
-    } else {
-        html::convert_plain(&book.text)
-    };
-    let (bytes, stats) = epub::build(&book, &conv, &images);
-    std::fs::write(output, bytes).map_err(|e| ConvertError::Io(format!("cannot write {}: {e}", output.display())))?;
+    trace.set_data("input.size", size);
+    let book = trace
+        .step("mobi.parse", "Parse and decompress MOBI", || mobi::parse(data))
+        .map_err(|message| ConvertError::Book { message, size })?;
+    trace.set_data("text.size", book.text.len());
+    let images = trace.step("mobi.images", "Collect images", || epub::collect_images(&book));
+    let conv = trace.step("html.convert", "Convert HTML to XHTML", || {
+        if book.is_html {
+            let names: HashMap<usize, String> = images.iter().map(|(k, v)| (*k, v.file.clone())).collect();
+            html::convert(&book.text, book.utf8, &names)
+        } else {
+            html::convert_plain(&book.text)
+        }
+    });
+    let (bytes, stats) = trace.step("epub.build", "Build EPUB package", || epub::build(&book, &conv, &images));
+    trace.set_data("output.size", bytes.len());
+    trace.set_data("chapters", stats.chapters);
+    trace.set_data("images", stats.images);
+    trace
+        .step("file.write", "Write output", || std::fs::write(output, &bytes))
+        .map_err(|e| ConvertError::Io(format!("cannot write {}: {e}", output.display())))?;
     Ok(format!(
         "\"{}\", {} part{}, {} image{}",
         book.title.trim(),
