@@ -33,7 +33,8 @@ pub fn init() -> Option<sentry::ClientInitGuard> {
     options.environment = Some(Cow::Borrowed(if cfg!(debug_assertions) { "development" } else { "production" }));
     options.send_default_pii = false;
     options.server_name = None; // don't report the machine's hostname
-    options.traces_sample_rate = traces_sample_rate();
+    // In sentry 0.49 tracing is off unless a sampling strategy is set.
+    let options = options.traces_sample_rate(traces_sample_rate());
     let guard = sentry::init((dsn.trim(), options));
     guard.is_enabled().then_some(guard)
 }
