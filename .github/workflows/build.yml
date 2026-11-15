@@ -14,7 +14,7 @@ permissions:
 env:
   # Pull requests may change dependencies, so they build without --locked;
   # everything else must match the committed Cargo.lock.
-  CARGO_LOCKED: ${{ github.event_name == 'pull_request' && '' || '--locked' }}
+  CARGO_LOCKED: ${{ github.event_name != 'pull_request' && '--locked' || '' }}
 
 jobs:
   lockfile:
