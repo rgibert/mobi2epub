@@ -1,9 +1,11 @@
 //! Optional crash/error reporting and performance monitoring via Sentry.
 //!
-//! Enabled only when a DSN is available: either `SENTRY_DSN` at runtime, or
-//! `MOBI2EPUB_SENTRY_DSN` baked in at build time (release builds get this
-//! from a CI secret). Setting `MOBI2EPUB_NO_TELEMETRY` to any value, or
-//! `SENTRY_DSN` to an empty string, turns it off.
+//! Enabled only when a DSN is available from `MOBI2EPUB_SENTRY_DSN`: read at
+//! runtime first, falling back to the value baked in at build time (release
+//! builds get this from a CI secret). The variable is namespaced so it doesn't
+//! pick up a `SENTRY_DSN` meant for some other program. Setting
+//! `MOBI2EPUB_NO_TELEMETRY` to any value, or `MOBI2EPUB_SENTRY_DSN` to an
+//! empty string, turns it off.
 //!
 //! What gets sent: panics (with a stack trace), conversion failures for books
 //! the tool couldn't read, and a performance trace per converted book (time
@@ -20,7 +22,7 @@ pub fn init() -> Option<sentry::ClientInitGuard> {
     if std::env::var_os("MOBI2EPUB_NO_TELEMETRY").is_some() {
         return None;
     }
-    let dsn = match std::env::var("SENTRY_DSN") {
+    let dsn = match std::env::var("MOBI2EPUB_SENTRY_DSN") {
         Ok(v) => v,
         Err(_) => option_env!("MOBI2EPUB_SENTRY_DSN")?.to_string(),
     };

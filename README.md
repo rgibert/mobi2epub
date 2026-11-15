@@ -45,9 +45,9 @@ counts. File names, paths and book contents are never sent.
 of conversions send a performance trace.
 
 To turn reporting off, set `MOBI2EPUB_NO_TELEMETRY=1`. To send reports to
-your own Sentry project instead, set `SENTRY_DSN`. Builds from source have
-reporting off unless `MOBI2EPUB_SENTRY_DSN` is set at build time or
-`SENTRY_DSN` at run time.
+your own Sentry project instead, set `MOBI2EPUB_SENTRY_DSN`. Builds from
+source have reporting off unless `MOBI2EPUB_SENTRY_DSN` is set at build time
+or at run time.
 
 ## Building
 
