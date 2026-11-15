@@ -37,6 +37,12 @@ jobs:
           - name: macos-arm64
             os: macos-latest
             target: aarch64-apple-darwin
+          - name: windows-amd64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - name: windows-arm64
+            os: windows-latest
+            target: aarch64-pc-windows-msvc
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -55,12 +61,22 @@ jobs:
           version="${GITHUB_REF_NAME}"
           dir="mobi2epub-${version}-${{ matrix.name }}"
           mkdir "$dir"
-          cp "target/${{ matrix.target }}/release/mobi2epub" README.md LICENSE "$dir/"
-          tar czf "$dir.tar.gz" "$dir"
-          shasum -a 256 "$dir.tar.gz" > "$dir.tar.gz.sha256"
-          echo "archive=$dir.tar.gz" >> "$GITHUB_OUTPUT"
+          cp README.md LICENSE "$dir/"
+          if [[ "${{ matrix.target }}" == *windows* ]]; then
+            cp "target/${{ matrix.target }}/release/mobi2epub.exe" "$dir/"
+            archive="$dir.zip"
+            7z a -tzip "$archive" "$dir" > /dev/null
+            sha256sum "$archive" > "$archive.sha256"
+          else
+            cp "target/${{ matrix.target }}/release/mobi2epub" "$dir/"
+            archive="$dir.tar.gz"
+            tar czf "$archive" "$dir"
+            shasum -a 256 "$archive" > "$archive.sha256"
+          fi
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
       - name: Upload to release
         if: github.event_name == 'release'
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "${{ github.event.release.tag_name }}" "${{ steps.package.outputs.archive }}" "${{ steps.package.outputs.archive }}.sha256" --clobber
@@ -69,4 +85,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: mobi2epub-${{ matrix.name }}
-          path: mobi2epub-*.tar.gz*
+          path: ${{ steps.package.outputs.archive }}*

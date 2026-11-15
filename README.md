@@ -53,5 +53,5 @@ for f in test-out/*.mobi; do python3 tests/check_epub.py "$f" "${f%.mobi}.epub";
 ## Releases
 
 Publishing a GitHub release triggers a workflow that builds binaries for
-Linux amd64 and arm64 (static, musl) and macOS arm64, and attaches them to
-the release.
+Linux amd64 and arm64 (static, musl), macOS arm64, and Windows x64 and
+ARM64, and attaches them to the release (`.tar.gz`, or `.zip` on Windows).
